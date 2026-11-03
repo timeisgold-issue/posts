@@ -88,6 +88,11 @@ def check() -> int:
     limit = api("GET", f"{user}/content_publishing_limit", fields="quota_usage,config")
     print(f"연결 확인 완료: @{info.get('username')}")
     print(f"오늘 API로 올린 수 / 하루 한도: {json.dumps(limit.get('data', limit), ensure_ascii=False)}")
+    prof = api("GET", user, fields="media_count")
+    print(f"프로필 게시물 수(API 기준): {prof.get('media_count')}")
+    media = api("GET", f"{user}/media", fields="permalink,timestamp,media_type", limit=10).get("data", [])
+    for m in media:
+        print(f"  {m.get('timestamp')} {m.get('media_type')} {m.get('permalink')}")
     return 0
 
 
