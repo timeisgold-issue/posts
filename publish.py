@@ -3,6 +3,7 @@
 
 queue/ 폴더 안의 게시물 폴더마다:
   1.jpg, 2.mp4, 3.jpg ... (최대 10장, 1080x1350, 영상은 3~60초 H.264)
+  또는 릴스: reel.mp4 (1080x1920, H.264) + cover.jpg(선택), post.json에 "trial": true면 평가판 릴스
   caption.txt      (게시글 본문)
   post.json        {"publish_at": "2026-11-04T07:30:00+09:00", "approved": true}
 
@@ -144,7 +145,40 @@ def make_child(user: str, path: Path) -> str:
     return c["id"]
 
 
+def read_caption(folder: Path) -> str:
+    caption = (folder / "caption.txt").read_text(encoding="utf-8").strip()
+    tags = re.findall(r"#\S+", caption)
+    if len(tags) > 5:
+        raise RuntimeError(f"해시태그는 5개까지만 돼요 (지금 {len(tags)}개)")
+    if len(caption) > 2200:
+        raise RuntimeError(f"본문이 너무 길어요 ({len(caption)}자, 최대 2200자)")
+    return caption
+
+
+def reel_container(user: str, video: Path, caption: str, cover: Path = None, trial: bool = False) -> str:
+    """릴스 컨테이너 생성. trial=True면 '평가판 릴스'(팔로워 아닌 사람에게 먼저, 반응 좋으면 자동 공개)."""
+    params = {"media_type": "REELS", "video_url": raw_url(video), "caption": caption, "share_to_feed": "true"}
+    if cover is not None and cover.exists():
+        params["cover_url"] = raw_url(cover)
+    if trial:
+        params["trial_params"] = json.dumps({"graduation_strategy": "SS_PERFORMANCE"})
+    return api("POST", f"{user}/media", **params)["id"]
+
+
+def publish_reel(folder: Path, user: str, meta: dict) -> dict:
+    caption = read_caption(folder)
+    cid = reel_container(user, folder / "reel.mp4", caption, folder / "cover.jpg", bool(meta.get("trial")))
+    wait_ready(cid, "릴스 영상", tries=90)
+    media = api("POST", f"{user}/media_publish", creation_id=cid)
+    info = api("GET", media["id"], fields="permalink,timestamp")
+    return {"media_id": media["id"], "permalink": info.get("permalink"),
+            "timestamp": info.get("timestamp"), "type": "reel", "trial": bool(meta.get("trial"))}
+
+
 def publish(folder: Path, user: str) -> dict:
+    if (folder / "reel.mp4").exists():
+        meta = json.loads((folder / "post.json").read_text(encoding="utf-8"))
+        return publish_reel(folder, user, meta)
     items = media_files(folder)
     if not 2 <= len(items) <= 10:
         raise RuntimeError(f"카드는 2~10장이어야 해요 (지금 {len(items)}장)")
@@ -178,6 +212,16 @@ def test_video() -> int:
     return 0
 
 
+def test_reel() -> int:
+    """릴스(평가판) 컨테이너가 처리되는지만 확인한다 (게시하지 않음, 24시간 뒤 자동 폐기)."""
+    user = find_user_id()
+    path = ROOT / "tools" / "test_reel.mp4"
+    cid = reel_container(user, path, "시험", trial=True)
+    wait_ready(cid, "시험 릴스", tries=60)
+    print(f"릴스(평가판) 처리 확인 완료 (게시 안 함): {path.name}")
+    return 0
+
+
 def main():
     if not os.environ.get("IG_ACCESS_TOKEN"):
         print("토큰이 아직 설정되지 않았어요. 게시를 건너뜁니다.")
@@ -186,6 +230,8 @@ def main():
         return check()
     if "--test-video" in sys.argv:
         return test_video()
+    if "--test-reel" in sys.argv:
+        return test_reel()
     now = datetime.now(timezone.utc)
     due = []
     for folder in sorted(p for p in QUEUE.glob("*") if p.is_dir()):
