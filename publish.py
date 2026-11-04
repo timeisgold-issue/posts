@@ -93,7 +93,36 @@ def check() -> int:
     media = api("GET", f"{user}/media", fields="permalink,timestamp,media_type", limit=10).get("data", [])
     for m in media:
         print(f"  {m.get('timestamp')} {m.get('media_type')} {m.get('permalink')}")
+    insights_report(user)
     return 0
+
+
+def insights_report(user: str) -> None:
+    """읽기 전용 진단: 팔로워 수, 계정 도달, 게시물별 조회·도달·저장·공유."""
+    try:
+        acc = api("GET", user, fields="followers_count,follows_count,media_count")
+        print(f"팔로워 {acc.get('followers_count')} / 팔로잉 {acc.get('follows_count')} / 게시물 {acc.get('media_count')}")
+    except Exception as e:
+        print(f"계정 정보 조회 실패: {e}")
+    for metric, extra in (("reach", {"period": "day"}), ("views", {"period": "day", "metric_type": "total_value"}),
+                          ("accounts_engaged", {"period": "day", "metric_type": "total_value"})):
+        try:
+            r = api("GET", f"{user}/insights", metric=metric, **extra)
+            print(f"계정 {metric}: {json.dumps(r.get('data', r), ensure_ascii=False)[:600]}")
+        except Exception as e:
+            print(f"계정 {metric} 조회 실패: {str(e)[:300]}")
+    media = api("GET", f"{user}/media", fields="id,timestamp,permalink,like_count,comments_count", limit=25).get("data", [])
+    print("게시물별 (시각 | 조회 | 도달 | 좋아요 | 댓글 | 저장 | 공유):")
+    for m in media:
+        vals = {}
+        for metric in ("views", "reach", "saved", "shares"):
+            try:
+                d = api("GET", f"{m['id']}/insights", metric=metric).get("data", [])
+                vals[metric] = d[0]["values"][0]["value"] if d else "-"
+            except Exception as e:
+                vals[metric] = "오류:" + str(e)[30:120]
+        print(f"  {m.get('timestamp')} | {vals['views']} | {vals['reach']} | {m.get('like_count')} | "
+              f"{m.get('comments_count')} | {vals['saved']} | {vals['shares']} | {m.get('permalink')}")
 
 
 def media_files(folder: Path):
