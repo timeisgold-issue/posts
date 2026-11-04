@@ -213,12 +213,12 @@ def test_video() -> int:
 
 
 def test_reel() -> int:
-    """릴스(평가판) 컨테이너가 처리되는지만 확인한다 (게시하지 않음, 24시간 뒤 자동 폐기)."""
+    """일반 릴스 컨테이너가 처리되는지만 확인한다 (게시하지 않음, 24시간 뒤 자동 폐기)."""
     user = find_user_id()
     path = ROOT / "tools" / "test_reel.mp4"
-    cid = reel_container(user, path, "시험", trial=True)
+    cid = reel_container(user, path, "시험", trial=False)
     wait_ready(cid, "시험 릴스", tries=60)
-    print(f"릴스(평가판) 처리 확인 완료 (게시 안 함): {path.name}")
+    print(f"릴스 처리 확인 완료 (게시 안 함): {path.name}")
     return 0
 
 
