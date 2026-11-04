@@ -113,14 +113,19 @@ def insights_report(user: str) -> None:
             print(f"계정 {metric} 조회 실패: {str(e)[:300]}")
     media = api("GET", f"{user}/media", fields="id,timestamp,permalink,like_count,comments_count", limit=25).get("data", [])
     print("게시물별 (시각 | 조회 | 도달 | 좋아요 | 댓글 | 저장 | 공유):")
+    no_perm = False
     for m in media:
         vals = {}
         for metric in ("views", "reach", "saved", "shares"):
+            if no_perm:
+                vals[metric] = "권한없음"
+                continue
             try:
                 d = api("GET", f"{m['id']}/insights", metric=metric).get("data", [])
                 vals[metric] = d[0]["values"][0]["value"] if d else "-"
             except Exception as e:
-                vals[metric] = "오류:" + str(e)[30:120]
+                no_perm = "(#10)" in str(e)
+                vals[metric] = "권한없음" if no_perm else "오류"
         print(f"  {m.get('timestamp')} | {vals['views']} | {vals['reach']} | {m.get('like_count')} | "
               f"{m.get('comments_count')} | {vals['saved']} | {vals['shares']} | {m.get('permalink')}")
 
