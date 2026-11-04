@@ -9,6 +9,10 @@ on:
         description: "토큰 연결만 확인하고 게시는 하지 않기"
         type: boolean
         default: true
+      test_video:
+        description: "영상 장 처리만 시험하기 (게시하지 않음)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,7 +30,7 @@ jobs:
         env:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
-        run: python3 publish.py ${{ inputs.check_only && '--check' || '' }}
+        run: python3 publish.py ${{ inputs.test_video && '--test-video' || (inputs.check_only && '--check' || '') }}
       - name: 결과 저장
         if: always()
         run: |

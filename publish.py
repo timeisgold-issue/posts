@@ -2,7 +2,7 @@
 예약된 카드뉴스를 인스타그램에 자동으로 게시하는 프로그램.
 
 queue/ 폴더 안의 게시물 폴더마다:
-  1.jpg, 2.jpg, ... (최대 10장, 1080x1350 권장)
+  1.jpg, 2.mp4, 3.jpg ... (최대 10장, 1080x1350, 영상은 3~60초 H.264)
   caption.txt      (게시글 본문)
   post.json        {"publish_at": "2026-11-04T07:30:00+09:00", "approved": true}
 
@@ -51,9 +51,9 @@ def api(method, path, **params):
         raise RuntimeError(f"{method} {path} 실패: {e.code} {e.read().decode()[:500]}")
 
 
-def wait_ready(container_id, label):
-    """인스타가 이미지를 다 가져갈 때까지 기다린다 (최대 약 5분)."""
-    for _ in range(30):
+def wait_ready(container_id, label, tries=30):
+    """인스타가 파일을 다 가져갈 때까지 기다린다 (기본 약 5분, 영상은 더 길게)."""
+    for _ in range(tries):
         status = api("GET", container_id, fields="status_code").get("status_code")
         if status == "FINISHED":
             return
@@ -96,30 +96,52 @@ def check() -> int:
     return 0
 
 
+def media_files(folder: Path):
+    """카드 순서대로 1.jpg, 2.mp4, 3.jpg ... (사진과 영상 섞기 가능)"""
+    files = [p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".mp4") and p.stem.isdigit()]
+    return sorted(files, key=lambda p: int(p.stem))
+
+
+def make_child(user: str, path: Path) -> str:
+    if path.suffix.lower() == ".mp4":
+        c = api("POST", f"{user}/media", media_type="VIDEO", video_url=raw_url(path), is_carousel_item="true")
+    else:
+        c = api("POST", f"{user}/media", image_url=raw_url(path), is_carousel_item="true")
+    return c["id"]
+
+
 def publish(folder: Path, user: str) -> dict:
-    images = sorted(folder.glob("*.jpg"), key=lambda p: int(p.stem))
-    if not 2 <= len(images) <= 10:
-        raise RuntimeError(f"이미지는 2~10장이어야 해요 (지금 {len(images)}장)")
+    items = media_files(folder)
+    if not 2 <= len(items) <= 10:
+        raise RuntimeError(f"카드는 2~10장이어야 해요 (지금 {len(items)}장)")
     caption = (folder / "caption.txt").read_text(encoding="utf-8").strip()
     tags = re.findall(r"#\S+", caption)
     if len(tags) > 5:
         raise RuntimeError(f"해시태그는 5개까지만 돼요 (지금 {len(tags)}개)")
     if len(caption) > 2200:
         raise RuntimeError(f"본문이 너무 길어요 ({len(caption)}자, 최대 2200자)")
-    children = []
-    for img in images:
-        c = api("POST", f"{user}/media", image_url=raw_url(img), is_carousel_item="true")
-        children.append(c["id"])
-    for i, cid in enumerate(children, 1):
-        wait_ready(cid, f"{i}번 이미지")
+    children = [(make_child(user, p), p) for p in items]
+    for i, (cid, p) in enumerate(children, 1):
+        is_video = p.suffix.lower() == ".mp4"
+        wait_ready(cid, f"{i}번 {'영상' if is_video else '이미지'}", tries=60 if is_video else 30)
 
     carousel = api("POST", f"{user}/media", media_type="CAROUSEL",
-                   children=",".join(children), caption=caption)
-    wait_ready(carousel["id"], "카드뉴스 묶음")
+                   children=",".join(cid for cid, _ in children), caption=caption)
+    wait_ready(carousel["id"], "카드뉴스 묶음", tries=60)
     media = api("POST", f"{user}/media_publish", creation_id=carousel["id"])
     info = api("GET", media["id"], fields="permalink,timestamp")
     return {"media_id": media["id"], "permalink": info.get("permalink"),
             "timestamp": info.get("timestamp")}
+
+
+def test_video() -> int:
+    """영상 장이 인스타에서 처리되는지만 확인한다 (게시하지 않음, 묶음 컨테이너는 24시간 뒤 자동 폐기)."""
+    user = find_user_id()
+    path = ROOT / "tools" / "test_video.mp4"
+    cid = make_child(user, path)
+    wait_ready(cid, "시험 영상", tries=60)
+    print(f"영상 처리 확인 완료 (게시 안 함): {path.name}")
+    return 0
 
 
 def main():
@@ -128,6 +150,8 @@ def main():
         return 0
     if "--check" in sys.argv:
         return check()
+    if "--test-video" in sys.argv:
+        return test_video()
     now = datetime.now(timezone.utc)
     due = []
     for folder in sorted(p for p in QUEUE.glob("*") if p.is_dir()):
